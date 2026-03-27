@@ -1,7 +1,6 @@
 {
   "name": "docker-network-demo",
   "version": "1.0.0",
-  "description": "Node.js + MongoDB Docker networking demo",
   "main": "app.js",
   "scripts": {
     "start": "node app.js"

@@ -3,13 +3,13 @@ FROM node:18-alpine
 WORKDIR /app
 
 # Copy package files first (better layer caching)
-COPY package.json package-lock.json* ./
+COPY package.json ./
 
 # Install dependencies
-RUN npm install --omit=dev
+RUN npm install
 
 # Copy app source
-COPY app.js .
+COPY . .
 
 # Expose the app port
 EXPOSE 3000
