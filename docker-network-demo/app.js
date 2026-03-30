@@ -5,7 +5,7 @@ const app = express();
 app.use(express.json());
 
 // "mongo" is the container name — Docker DNS resolves it on the network
-const MONGO_URI = 'mongodb://mongo:27018/mydb';
+const MONGO_URI = 'mongodb://mongo:27017/mydb';
 
 mongoose.connect(MONGO_URI)
   .then(() => console.log('✅ Connected to MongoDB'))
@@ -48,3 +48,4 @@ app.get('/health', (req, res) => {
 });
 
 app.listen(3000, () => console.log('🚀 App running on http://localhost:3000'));
+
