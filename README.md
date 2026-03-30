@@ -1,7 +1,8 @@
 # Docker Network Demo 🐳
 
-A Node.js + MongoDB app demonstrating Docker custom networking.
-Containers talk to each other using container names as hostnames — no hardcoded IPs needed.
+A Node.js + MongoDB app demonstrating **Docker custom networking with internal DNS resolution**.
+
+Containers communicate using **service names (container names)** instead of IPs — exactly how real microservices work.
 
 ---
 
@@ -9,155 +10,214 @@ Containers talk to each other using container names as hostnames — no hardcode
 
 ```
 docker-network-demo/
-├── app.js          # Express + Mongoose app
-├── package.json    # Dependencies
-├── Dockerfile      # Image build instructions
-└── .dockerignore   # Files to exclude from image
+├── app.js
+├── package.json
+├── Dockerfile
+└── .dockerignore
 ```
 
 ---
 
-## How It Works
+## Architecture Overview
 
 ```
 Browser → http://localhost:3000
               ↓
-        [webapp container]        my-network
-        Node.js + Express   ──────────────────→  [mongo container]
-        port 3000:3000                            MongoDB
-                                                  port 27018:27017
+        [appcontainer]  (Node.js)
+              │
+              │  my-network (user-defined bridge)
+              │
+        [mongo] (MongoDB)
 ```
 
-- Both containers are on the same custom network called `my-network`
-- The Node.js app connects to MongoDB using the container name as hostname: `mongodb://mongo:27017`
-- Docker automatically resolves the container name to its internal IP (built-in DNS)
-- MongoDB port is mapped to `27018` on the host to avoid conflict with any locally installed MongoDB
+---
+
+## Core Networking Concept
+
+- Both containers are attached to **`my-network`**
+- Docker provides **built-in DNS** in user-defined networks
+- The app connects using:
+  ```
+  mongodb://mongo:27017
+  ```
+- No IP addresses needed
 
 ---
 
 ## Prerequisites
 
 - Docker installed and running
-- MongoDB Compass (optional, to view data visually)
+- MongoDB Compass (optional)
 
 ---
 
-## Step by Step Commands
+## Step-by-Step Setup
 
-### Step 1 — Create the custom Docker network
+### 1. Create a custom network
 ```bash
 docker network create my-network
 ```
 
-### Step 2 — Run MongoDB container on the network
-```bash
-docker run -d --name mongo --network my-network -p 27018:27017 mongo:7
-```
-- `--name mongo` → sets the hostname other containers use to reach it
-- `--network my-network` → joins the custom network
-- `-p 27018:27017` → exposes MongoDB to host on port 27018 (avoids conflict with local MongoDB)
+---
 
-### Step 3 — Build the Node.js image
+### 2. Run MongoDB container
+```bash
+docker run -d \
+  --name mongo \
+  --network my-network \
+  -p 27018:27017 \
+  mongo:7
+```
+
+**Why:**
+- `mongo` → becomes hostname inside network
+- `my-network` → enables DNS resolution
+- `27018` → avoids conflict with local MongoDB
+
+---
+
+### 3. Build Node.js image
 ```bash
 docker build -t my-webapp .
 ```
 
-### Step 4 — Run the Node.js app on the same network
-```bash
-docker run -d --name appcontainer --network my-network -p 3000:3000 my-webapp
-```
-- `--name appcontainer` → container name
-- `--network my-network` → must be same network as mongo
-- `-p 3000:3000` → exposes app to your browser
+---
 
-### Step 5 — Verify both containers are running
+### 4. Run Node.js container
+```bash
+docker run -d \
+  --name appcontainer \
+  --network my-network \
+  -p 3000:3000 \
+  my-webapp
+```
+
+---
+
+### 5. Verify containers
 ```bash
 docker ps
 ```
-You should see both `mongo` and `appcontainer` listed.
 
-### Step 6 — Verify both are on the same network
+---
+
+### 6. Verify network connection
 ```bash
 docker network inspect my-network
 ```
-Look for the `"Containers"` section — both `mongo` and `appcontainer` should be listed.
 
-### Step 7 — Open the app
+Both `mongo` and `appcontainer` must appear under `"Containers"`
+
+---
+
+### 7. Run the app
 ```
 http://localhost:3000
 ```
-Type a message and click Save. It gets stored in MongoDB.
 
-### Step 8 — View data in MongoDB Compass
-Add a new connection in Compass:
+---
+
+### 8. View data in MongoDB Compass
 ```
 mongodb://localhost:27018
 ```
-Navigate to: `mydb` → `messages` collection
+
+Navigate:
+```
+mydb → messages
+```
+
+---
+
+## Internal Communication Flow
+
+Inside container:
+```
+appcontainer → mongo:27017
+```
+
+Outside (host):
+```
+localhost:27018 → mongo container
+localhost:3000 → appcontainer
+```
+
+---
+
+## Important Networking Rules
+
+| Scenario | Works? | Reason |
+|--------|------|--------|
+| App → Mongo using `mongo` | ✔ | Docker DNS |
+| App → Mongo using `localhost` | ❌ | Localhost = same container |
+| Containers in same network | ✔ | Shared network |
+| Containers in different networks | ❌ | Isolated |
+
+---
+
+## docker network connect (Dynamic Attach)
+
+If container is already running:
+
+```bash
+docker network connect my-network appcontainer
+```
+
+Then restart:
+```bash
+docker restart appcontainer
+```
 
 ---
 
 ## Useful Commands
 
-### View container logs
+### View logs
 ```bash
 docker logs appcontainer
 ```
-Should show:
-```
-✅ Connected to MongoDB
-🚀 App running on http://localhost:3000
-```
 
-### Go inside a container
+---
+
+### Enter containers
 ```bash
 docker exec -it appcontainer sh
 docker exec -it mongo mongosh
 ```
 
-### Check data directly in MongoDB
+---
+
+### Check MongoDB data
 ```bash
 docker exec -it mongo mongosh
 use mydb
 db.messages.find()
 ```
 
-### Connect a running container to a network
-```bash
-docker network connect my-network appcontainer
-```
+---
 
-### List all networks
+### List networks
 ```bash
 docker network ls
 ```
 
 ---
 
-## Cleanup
-
-Stop and remove containers:
+### Inspect container networking
 ```bash
-docker stop appcontainer mongo
-docker rm appcontainer mongo
-```
-
-Remove the network:
-```bash
-docker network rm my-network
-```
-
-Remove the image:
-```bash
-docker rmi my-webapp
+docker inspect appcontainer
 ```
 
 ---
 
-## Issues Faced & Fixes
+## Common Issues & Fixes
 
-### ❌ `getaddrinfo ENOTFOUND mongo`
-**Cause:** The webapp container was not on `my-network`, so Docker DNS couldn't resolve the name `mongo`.
+---
+
+### ❌ getaddrinfo ENOTFOUND mongo
+
+**Cause:**  
+Container not connected to `my-network`
 
 **Fix:**
 ```bash
@@ -167,33 +227,67 @@ docker restart appcontainer
 
 ---
 
-### ❌ Data not showing in MongoDB Compass
-**Cause:** Local MongoDB was already running on port `27017`, so Compass was connecting to the local install instead of the Docker container.
+### ❌ MongoDB connection refused (ECONNREFUSED)
 
-**Fix:** Re-run the mongo container mapped to port `27018` instead:
-```bash
-docker stop mongo
-docker rm mongo
-docker run -d --name mongo --network my-network -p 27018:27017 mongo:7
+**Cause:**  
+Wrong port or MongoDB not ready
+
+**Fix:**
+- Ensure connection string:
+  ```
+  mongodb://mongo:27017
+  ```
+- Check logs:
+  ```bash
+  docker logs mongo
+  ```
+
+---
+
+### ❌ Data not visible in MongoDB Compass
+
+**Cause:**  
+Connected to local MongoDB instead of container
+
+**Fix:**
 ```
-Then connect Compass to `mongodb://localhost:27018`
+mongodb://localhost:27018
+```
 
 ---
 
-## Key Concepts
+## Best Practices
 
-| Concept | Explanation |
-|---|---|
-| Custom network | Isolated network where containers can communicate |
-| Container name as hostname | Docker DNS resolves `mongo` to the container's internal IP automatically |
-| `-p host:container` | Maps a container port to your host machine |
-| No `-p` on internal services | Keeps the service only accessible inside the network (more secure) |
-| `docker network connect` | Attaches a running container to a network without recreating it |
+- Always use **custom networks**
+- Never hardcode IPs
+- Use container names as hostnames
+- Expose only required ports
+- Avoid exposing database ports in production
 
 ---
 
-## Next Steps to Explore
+## Cleanup
 
-- **Volumes** — persist MongoDB data even if the container is deleted
-- **Environment variables** — pass MongoDB URL dynamically using `-e` flag
-- **Docker Compose** — define all containers, networks, and volumes in one `docker-compose.yml` file
+```bash
+docker stop appcontainer mongo
+docker rm appcontainer mongo
+docker network rm my-network
+docker rmi my-webapp
+```
+
+---
+
+## What You Learned
+
+- Docker DNS-based service discovery
+- Container-to-container communication
+- Host vs container networking
+- Dynamic network attachment using `docker network connect`
+
+---
+
+## Next Steps
+
+- Volumes → persist MongoDB data
+- Environment variables → dynamic configuration
+- Docker Compose → manage everything in one file
